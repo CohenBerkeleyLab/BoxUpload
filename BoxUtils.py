@@ -55,7 +55,7 @@ def _remove_path_head(path, head):
 
 def _find_missing_remote_files_recursive(localdir, remotedir):
     # Get the listing of all files in the remote directory
-    lftp_cmd = "find {0}; bye"
+    lftp_cmd = "find {0}; bye".format(remotedir)
     try:
         lsremote = subprocess.check_output(["lftp", "-e", lftp_cmd, box_url])
     except subprocess.CalledProcessError as err:
