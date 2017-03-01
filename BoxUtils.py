@@ -20,6 +20,16 @@ def shell_msg(msg):
     """
     print(msg, file=sys.stderr)
 
+def shell_error(msg, exitcode=1):
+    """
+    Prints an error message to the shell.
+    :param msg: The message to print
+    :param exitcode: The exit status to use. Default is 1
+    :return: nothing, exits program
+    """
+    print(msg, file=sys.stderr)
+    exit(exitcode)
+
 def remove_hidden_files(files):
     """
     Given a list of strings, removes any that represent hidden files/directories (start with ".")
