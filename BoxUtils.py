@@ -8,6 +8,10 @@ import re
 box_url = "ftp.box.com"
 DEBUG_LEVEL = 0
 
+#The Data Transfer Node uses an old version of Python where subprocess does not have the
+#check_output function, therefore we need to revert to an older syntax in that case
+modern_subproc = hasattr(subprocess,"check_output")
+
 def shell_msg(msg):
     """
     Prints a message to the shell on stderr to ensure it doesn't get put into a shell variable
@@ -50,9 +54,13 @@ def iter_dir_tree(top, nohidden=True, pattern=".*"):
 def are_remote_files_missing(localdir, remotedir, filepat=".*"):
     missing = _find_missing_remote_files_recursive(localdir, remotedir, filepat=filepat)
     if DEBUG_LEVEL > 0:
-        print("Summary of files missing from remote:")
-        for f in missing:
-            print("  {0}".format(f))
+        if len(missing) > 0:
+            print("Summary of files missing from remote:")
+            for f in missing:
+                print("  {0}".format(f))
+        else:
+            print("No files missing from remote")
+
     return len(missing) > 0
 
 def _remove_path_head(path, head):
@@ -73,12 +81,16 @@ def _remove_path_head(path, head):
 def _find_missing_remote_files_recursive(localdir, remotedir, filepat=".*"):
     # Get the listing of all files in the remote directory
     lftp_cmd = "find {0}; bye".format(remotedir)
-    try:
-        lsremote = subprocess.check_output(["lftp", "-e", lftp_cmd, box_url])
-    except subprocess.CalledProcessError as err:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore") # CalledProcessError uses the deprecated message field
-            raise RuntimeError("Problem with lftp command {0}: {1}".format(lftp_cmd, err.message))
+    if modern_subproc:
+        try:
+            lsremote = subprocess.check_output(["lftp", "-e", lftp_cmd, box_url])
+        except subprocess.CalledProcessError as err:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore") # CalledProcessError uses the deprecated message field
+                raise RuntimeError("Problem with lftp command {0}: {1}".format(lftp_cmd, err.message))
+    else:
+        lproc = subprocess.Popen(["lftp", "-e", lftp_cmd, box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        lsremote, lsstderr = lproc.communicate()
 
     lsremote = lsremote.splitlines()
     # The way we do this we need to remove the top directory in the remote list
