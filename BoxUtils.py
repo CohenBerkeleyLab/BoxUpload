@@ -61,7 +61,7 @@ def iter_dir_tree(top, nohidden=True, pattern=".*"):
             if re.match(pattern, f):
                 yield os.path.join(root, f)
 
-def are_remote_files_missing(localdir, remotedir, filepat=".*"):
+def are_remote_files_missing(localdir, remotedir, doprint=False, filepat=".*"):
     missing = _find_missing_remote_files_recursive(localdir, remotedir, filepat=filepat)
     if DEBUG_LEVEL > 0:
         if len(missing) > 0:
@@ -70,6 +70,11 @@ def are_remote_files_missing(localdir, remotedir, filepat=".*"):
                 print("  {0}".format(f))
         else:
             print("No files missing from remote")
+
+    if doprint:
+        # Print the missing files as one line - intended for use with a bash's $() syntax (or equivalent) to store
+        # missing files in a shell variable
+        print(" ".join(missing))
 
     return len(missing) > 0
 

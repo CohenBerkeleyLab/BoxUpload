@@ -9,6 +9,7 @@ def get_args():
     parser.add_argument("localdir", help="The local directory to be mirrored")
     parser.add_argument("remotedir", help="The remote directory that should equal the local one. Do not start with /")
     parser.add_argument("--verbose","-v", action="count", help="Increase verbosity; will print missing files or indicate what files are being checked ")
+    parser.add_argument("-l", action="store_true", help="List missing files so that the shell receives the list.")
 
     filepatgrp = parser.add_mutually_exclusive_group()
     filepatgrp.add_argument("--pattern", default=None, help="A regular expression (using the Python re syntax) to match against file names")
@@ -34,12 +35,15 @@ def main():
     else:
         filepattern = args.pattern
 
+    if args.verbose > 0 and args.l:
+        utils.shell_msg("Warning: verbosity > 0 and -l flag present; values printed may include more than file names")
+
     utils.DEBUG_LEVEL = args.verbose
 
     if isinstance(filepattern, str):
-        are_missing = utils.are_remote_files_missing(localdir, remotedir, filepat=filepattern)
+        are_missing = utils.are_remote_files_missing(localdir, remotedir, doprint=args.l, filepat=filepattern)
     else:
-        are_missing = utils.are_remote_files_missing(localdir, remotedir)
+        are_missing = utils.are_remote_files_missing(localdir, remotedir, doprint=args.l)
 
     if are_missing:
         exit(1)
