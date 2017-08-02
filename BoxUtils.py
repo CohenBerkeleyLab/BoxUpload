@@ -6,6 +6,8 @@ import subprocess
 import warnings
 import re
 
+import pdb
+
 box_url = "ftp.box.com"
 DEBUG_LEVEL = 0
 
@@ -133,20 +135,27 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
     # Input checking
     if not os.path.isdir(localdir):
         raise ValueError('localdir must be a directory (not a file)')
-    if max_num_files is not None and max_num_files <= 0 or not isinstance(max_num_files, int):
+    if max_num_files is not None and (max_num_files <= 0 or not isinstance(max_num_files, int)):
         raise ValueError('max_num_files must be a positive integer, if given')
 
-    # We want to be in the parent directory of the local directory to mirror
     localdir = localdir.rstrip('/\\')
-    remotedir = remotedir.rstrip('/\\')
-    os.chdir(os.path.dirname(localdir))
 
     # Make the directory on the remote. Remove any possible trailing slash because we always want to mirror exactly,
     # i.e. make the remote directory be like the local one, not put the local one inside the remote directory
     remotedir = remotedir.rstrip('/\\')
-    child = subprocess.Popen(["lftp", "-e", "mkdir -p {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if child.wait() != 0:
-        raise RuntimeError("mkdir -p failed on remote: {0}".format(child.communicate()[1]))
+    # Have to check if the directory already exists, if we can CD into it, it exists
+    remote_dir_exists = subprocess.Popen(["lftp", "-e", "cd {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE).wait() == 0
+
+    if remote_dir_exists:
+        if verbosity > 2:
+            shell_msg("Remote directory {0} already exists, no need to create it".format(remotedir))
+    else:
+        if verbosity > 2:
+            shell_msg("Creating remote directory {0}".format(remotedir))
+
+        child = subprocess.Popen(["lftp", "-e", "mkdir -p {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if child.wait() != 0:
+            raise RuntimeError("mkdir -p failed on remote: {0}".format(child.communicate()[1]))
 
     # Are we actually missing any files?
     missing_files = find_missing_remote_files_recursive(localdir, remotedir)
@@ -164,12 +173,17 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
         for f in missing_files:
             file_subdir = os.path.dirname(f)
             file_remote_path = remotedir + "/" + file_subdir
+            file_local_path = os.path.join(localdir, f)
             if verbosity > 1:
-                shell_msg("Transferring file {0} of {1}: {2}".format(missing_files.index(f), len(missing_files), f))
-            return_code = subprocess.Popen(["lftp", "-e", "put -O '{0}' {1}; bye".format(file_remote_path, f)],
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE).wait()
+                shell_msg("Transferring file {0} of {1}: {2}".format(missing_files.index(f)+1, len(missing_files), file_local_path))
+            lftp_cmd = ["lftp", "-e", "put -O '{0}' {1}; bye".format(file_remote_path, file_local_path), box_url]
+            shell_msg("LFTP command = {0}".format( ' '.join(lftp_cmd)))
+            child = subprocess.Popen(lftp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return_code = child.wait()
             if return_code != 0 and verbosity > 1:
                 shell_msg("  Transfer failed; will try again after trying all other files")
+                if verbosity > 2:
+                    shell_msg("    From lftp: {0}".format(child.communicate()[1]))
 
         tmp_missing_files = find_missing_remote_files_recursive(localdir, remotedir)
         missing_files = [f for f in files_to_transfer if f in tmp_missing_files]
