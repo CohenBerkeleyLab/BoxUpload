@@ -94,18 +94,16 @@ def _remove_path_head(path, head):
     return path
 
 def _make_remote_dir_if_needed(remotedir, verbosity=0):
-    remote_dir_exists = subprocess.Popen(["lftp", "-e", "cd {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE).wait() == 0
-
-    if remote_dir_exists:
-        if verbosity > 2:
-            shell_msg("Remote directory {0} already exists, no need to create it".format(remotedir))
-    else:
-        if verbosity > 2:
-            shell_msg("Creating remote directory {0}".format(remotedir))
-
-        child = subprocess.Popen(["lftp", "-e", "mkdir -p {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if child.wait() != 0:
+    child = subprocess.Popen(["lftp", "-e", "mkdir -p {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if child.wait() != 0:
+        err_msg = child.communicate()[1]
+        if 'already exists' in err_msg:
+            if verbosity > 2:
+                shell_msg('Remote directory {0} already exists, no need to create it'.format(remotedir))
+        else:
             raise RuntimeError("mkdir -p failed on remote: {0}".format(child.communicate()[1]))
+    elif verbosity > 2:
+        shell_msg('Created remote directory {0}'.format(remotedir))
 
 
 def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*"):
