@@ -153,8 +153,10 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
         raise ValueError('max_num_files must be a positive integer, if given')
 
     localdir = localdir.rstrip('/\\')
+    remotedir = remotedir.rstrip('/\\')
 
-    # Are we actually missing any files?
+    # Are we actually missing any files? We need to make the root remote directory before doing this operation
+    _make_remote_dir_if_needed(remotedir)
     missing_files = find_missing_remote_files_recursive(localdir, remotedir)
     # Limit the number of files we'll try to mirror at once, if requested
     if max_num_files is not None:
