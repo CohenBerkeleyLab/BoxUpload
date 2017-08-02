@@ -6,6 +6,8 @@ import subprocess
 import warnings
 import re
 
+#TODO: figure out a way to check if a file exists on the remote, but the local file is newer/different
+
 box_url = "ftp.box.com"
 DEBUG_LEVEL = 0
 
@@ -104,6 +106,17 @@ def _make_remote_dir_if_needed(remotedir, verbosity=0):
             raise RuntimeError("mkdir -p failed on remote: {0}".format(child.communicate()[1]))
     elif verbosity > 2:
         shell_msg('Created remote directory {0}'.format(remotedir))
+
+def _is_remote_file_different(local_file, remote_file, fatal_if_nonexistant=False):
+    """
+    Checks the modification time and size of the local file against the remote file.
+    :param local_file: The path to the local file
+    :param remote_file: The path to the remote file
+    :param fatal_if_nonexistant: boolean (default False) that controls if an error should be thrown if the remote file
+    does not exist.
+    :return: a boolean, True if the remote file is younger or a different size than the local file, False otherwise
+    """
+    child = subprocess.Popen(["lftp", "-e", "cls -l {0}; bye".format(remote_file)])
 
 
 def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*"):
