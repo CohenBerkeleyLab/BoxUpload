@@ -22,11 +22,12 @@ def get_args():
     parser.add_argument('--verbose', '-v', action='count', help='Increase verbosity; will print more real time information about the behavior of LFTP')
 
     args = parser.parse_args()
-    return args.localdir, args.remotedir, args.max_files, args.max_attempts, args.verbosity
+    return args.localdir, args.remotedir, int(args.max_files), int(args.max_attempts), args.verbose
 
 def main():
-    localdir, remotedir, max_files, max_attemps, verbosity = get_args()
-    result = BoxUtils.mirror_local_to_remote(localdir, remotedir, max_num_files=max_files, number_attempts=max_attemps, verbosity=verbosity)
+    localdir, remotedir, max_files, max_attempts, verbosity = get_args()
+
+    result = BoxUtils.mirror_local_to_remote(localdir, remotedir, max_num_files=max_files, number_attempts=max_attempts, verbosity=verbosity)
     if result:
         exit(0)
     else:

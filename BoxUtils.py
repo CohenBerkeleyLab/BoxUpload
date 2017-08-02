@@ -155,13 +155,13 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
 
     # Are we actually missing any files? We need to make the root remote directory before doing this operation
     _make_remote_dir_if_needed(remotedir)
-    missing_files = find_missing_remote_files_recursive(localdir, remotedir)
+    missing_files = sorted(find_missing_remote_files_recursive(localdir, remotedir))
     # Limit the number of files we'll try to mirror at once, if requested
     if max_num_files is not None:
         missing_files = missing_files[:max_num_files]
 
-    files_to_transfer = copy.copy(missing_files)  # may not need to copy here, since I reassign the whole missing files
-                                                  # array later, but can't hurt (except for using more memory)
+    files_to_transfer = copy.copy(missing_files)
+    
     if verbosity > 0:
         shell_msg("{0} files to transfer (max requested is {1})".format(
             len(files_to_transfer), 'unlimited' if max_num_files is None else max_num_files))
@@ -175,7 +175,6 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
             if verbosity > 1:
                 shell_msg("Transferring file {0} of {1}: {2}".format(missing_files.index(f)+1, len(missing_files), file_local_path))
             lftp_cmd = ["lftp", "-e", "put -O '{0}' {1}; bye".format(file_remote_path, file_local_path), box_url]
-            shell_msg("LFTP command = {0}".format( ' '.join(lftp_cmd)))
             child = subprocess.Popen(lftp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             return_code = child.wait()
             if return_code != 0 and verbosity > 1:
