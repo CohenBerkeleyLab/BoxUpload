@@ -95,6 +95,20 @@ def _remove_path_head(path, head):
 
     return path
 
+def _make_remote_dir_if_needed(remotedir, verbosity=0):
+    remote_dir_exists = subprocess.Popen(["lftp", "-e", "cd {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE).wait() == 0
+
+    if remote_dir_exists:
+        if verbosity > 2:
+            shell_msg("Remote directory {0} already exists, no need to create it".format(remotedir))
+    else:
+        if verbosity > 2:
+            shell_msg("Creating remote directory {0}".format(remotedir))
+
+        child = subprocess.Popen(["lftp", "-e", "mkdir -p {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if child.wait() != 0:
+            raise RuntimeError("mkdir -p failed on remote: {0}".format(child.communicate()[1]))
+
 
 def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*"):
     # Get the listing of all files in the remote directory
@@ -140,23 +154,6 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
 
     localdir = localdir.rstrip('/\\')
 
-    # Make the directory on the remote. Remove any possible trailing slash because we always want to mirror exactly,
-    # i.e. make the remote directory be like the local one, not put the local one inside the remote directory
-    remotedir = remotedir.rstrip('/\\')
-    # Have to check if the directory already exists, if we can CD into it, it exists
-    remote_dir_exists = subprocess.Popen(["lftp", "-e", "cd {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE).wait() == 0
-
-    if remote_dir_exists:
-        if verbosity > 2:
-            shell_msg("Remote directory {0} already exists, no need to create it".format(remotedir))
-    else:
-        if verbosity > 2:
-            shell_msg("Creating remote directory {0}".format(remotedir))
-
-        child = subprocess.Popen(["lftp", "-e", "mkdir -p {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if child.wait() != 0:
-            raise RuntimeError("mkdir -p failed on remote: {0}".format(child.communicate()[1]))
-
     # Are we actually missing any files?
     missing_files = find_missing_remote_files_recursive(localdir, remotedir)
     # Limit the number of files we'll try to mirror at once, if requested
@@ -173,6 +170,7 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
         for f in missing_files:
             file_subdir = os.path.dirname(f)
             file_remote_path = remotedir + "/" + file_subdir
+            _make_remote_dir_if_needed(file_remote_path, verbosity=verbosity)
             file_local_path = os.path.join(localdir, f)
             if verbosity > 1:
                 shell_msg("Transferring file {0} of {1}: {2}".format(missing_files.index(f)+1, len(missing_files), file_local_path))
