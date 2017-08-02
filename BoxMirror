@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+from __future__ import print_function
+import argparse
+import BoxUtils
+
+def get_args():
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
+                                     description="Mirror a local directory to a remote directory on Box",
+                                     epilog='Note: there is a difference in behavior between this program and LFTP\'s\n'
+                                            'mirror -R command when it comes to the specification of the remote \n'
+                                            'directory. For this program, the remote directory is ALWAYS assumed\n'
+                                            'to be the one that should look like the local directory when the\n'
+                                            'operation is done. That is, this program doesn\'t care if the remote\n'
+                                            'directory ends in a /, the subdirectories of the local dir will be placed\n'
+                                            'immediately in the remote directory (whereas LFTP will place the local\n'
+                                            'directory itself in the remote directory if the remote directory path\n'
+                                            'given ends in a /)')
+    parser.add_argument('localdir', help='The local directory to mirror')
+    parser.add_argument('remotedir', help='The remote directory to mirror to; it will take on the EXACT structure of the local directory')
+    parser.add_argument('--max-files', '-n', help='The maximum number of files to try to copy (default unlimited)')
+    parser.add_argument('--max-attempts', '-m', help='The maximum number of times to attempt to copy the files (default 10)')
+    parser.add_argument('--verbose', '-v', action='count', help='Increase verbosity; will print more real time information about the behavior of LFTP')
+
+    args = parser.parse_args()
+    return args.localdir, args.remotedir, args.max_files, args.max_attempts, args.verbosity
+
+def main():
+    localdir, remotedir, max_files, max_attemps, verbosity = get_args()
+    result = BoxUtils.mirror_local_to_remote(localdir, remotedir, max_num_files=max_files, number_attempts=max_attemps, verbosity=verbosity)
+    if result:
+        exit(0)
+    else:
+        exit(1)
+
+if __name__ == '__main__':
+    main()

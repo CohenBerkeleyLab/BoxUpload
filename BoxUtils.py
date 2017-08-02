@@ -6,8 +6,6 @@ import subprocess
 import warnings
 import re
 
-import pdb
-
 box_url = "ftp.box.com"
 DEBUG_LEVEL = 0
 
@@ -153,7 +151,7 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
         raise ValueError('max_num_files must be a positive integer, if given')
 
     localdir = localdir.rstrip('/\\')
-    remotedir = remotedir.rstrip('/\\')
+    remotedir = remotedir.strip('/')
 
     # Are we actually missing any files? We need to make the root remote directory before doing this operation
     _make_remote_dir_if_needed(remotedir)
