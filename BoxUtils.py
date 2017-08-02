@@ -1,4 +1,5 @@
 from __future__ import print_function
+import copy
 import os
 import sys
 import subprocess
@@ -62,7 +63,7 @@ def iter_dir_tree(top, nohidden=True, pattern=".*"):
                 yield os.path.join(root, f)
 
 def are_remote_files_missing(localdir, remotedir, doprint=False, filepat=".*"):
-    missing = _find_missing_remote_files_recursive(localdir, remotedir, filepat=filepat)
+    missing = find_missing_remote_files_recursive(localdir, remotedir, filepat=filepat)
     if DEBUG_LEVEL > 0:
         if len(missing) > 0:
             print("Summary of files missing from remote:")
@@ -93,7 +94,7 @@ def _remove_path_head(path, head):
     return path
 
 
-def _find_missing_remote_files_recursive(localdir, remotedir, filepat=".*"):
+def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*"):
     # Get the listing of all files in the remote directory
     lftp_cmd = "find {0}; bye".format(remotedir)
     if modern_subproc:
@@ -128,3 +129,64 @@ def _find_missing_remote_files_recursive(localdir, remotedir, filepat=".*"):
 
     return missing_files
 
+def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attempts=10, verbosity=0):
+    # Input checking
+    if not os.path.isdir(localdir):
+        raise ValueError('localdir must be a directory (not a file)')
+    if max_num_files is not None and max_num_files <= 0 or not isinstance(max_num_files, int):
+        raise ValueError('max_num_files must be a positive integer, if given')
+
+    # We want to be in the parent directory of the local directory to mirror
+    localdir = localdir.rstrip('/\\')
+    remotedir = remotedir.rstrip('/\\')
+    os.chdir(os.path.dirname(localdir))
+
+    # Make the directory on the remote. Remove any possible trailing slash because we always want to mirror exactly,
+    # i.e. make the remote directory be like the local one, not put the local one inside the remote directory
+    remotedir = remotedir.rstrip('/\\')
+    child = subprocess.Popen(["lftp", "-e", "mkdir -p {0}; bye".format(remotedir), box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if child.wait() != 0:
+        raise RuntimeError("mkdir -p failed on remote: {0}".format(child.communicate()[1]))
+
+    # Are we actually missing any files?
+    missing_files = find_missing_remote_files_recursive(localdir, remotedir)
+    # Limit the number of files we'll try to mirror at once, if requested
+    if max_num_files is not None:
+        missing_files = missing_files[:max_num_files]
+
+    files_to_transfer = copy.copy(missing_files)  # may not need to copy here, since I reassign the whole missing files
+                                                  # array later, but can't hurt (except for using more memory)
+    if verbosity > 0:
+        shell_msg("{0} files to transfer (max requested is {1})".format(
+            len(files_to_transfer), 'unlimited' if max_num_files is None else max_num_files))
+
+    while len(missing_files) > 0 and number_attempts > 0:
+        for f in missing_files:
+            file_subdir = os.path.dirname(f)
+            file_remote_path = remotedir + "/" + file_subdir
+            if verbosity > 1:
+                shell_msg("Transferring file {0} of {1}: {2}".format(missing_files.index(f), len(missing_files), f))
+            return_code = subprocess.Popen(["lftp", "-e", "put -O '{0}' {1}; bye".format(file_remote_path, f)],
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE).wait()
+            if return_code != 0 and verbosity > 1:
+                shell_msg("  Transfer failed; will try again after trying all other files")
+
+        tmp_missing_files = find_missing_remote_files_recursive(localdir, remotedir)
+        missing_files = [f for f in files_to_transfer if f in tmp_missing_files]
+
+        number_attempts -= 1
+
+        if len(missing_files) == 0:
+            if verbosity > 0:
+                shell_msg("Transfer of {0} files successful".format(len(files_to_transfer)))
+            break
+        elif verbosity > 0 and number_attempts > 0:
+            shell_msg("{0} of {1} files did not transfer, I will try {2} more times".format(
+                len(missing_files), len(files_to_transfer), number_attempts
+            ))
+        elif verbosity > 0:
+            shell_msg("{0} of {1} files did not transfer, but I am out of attempts. Stopping".format(
+                len(missing_files), len(files_to_transfer)
+            ))
+
+    return len(missing_files) == 0
