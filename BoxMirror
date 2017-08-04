@@ -3,6 +3,8 @@ from __future__ import print_function
 import argparse
 import BoxUtils
 
+default_max_attempts = 10
+
 def get_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
                                      description="Mirror a local directory to a remote directory on Box",
@@ -18,11 +20,21 @@ def get_args():
     parser.add_argument('localdir', help='The local directory to mirror')
     parser.add_argument('remotedir', help='The remote directory to mirror to; it will take on the EXACT structure of the local directory')
     parser.add_argument('--max-files', '-n', help='The maximum number of files to try to copy (default unlimited)')
-    parser.add_argument('--max-attempts', '-m', help='The maximum number of times to attempt to copy the files (default 10)')
+    parser.add_argument('--max-attempts', '-m', help='The maximum number of times to attempt to copy the files (default {})'.format(default_max_attempts))
     parser.add_argument('--verbose', '-v', action='count', help='Increase verbosity; will print more real time information about the behavior of LFTP')
 
     args = parser.parse_args()
-    return args.localdir, args.remotedir, int(args.max_files), int(args.max_attempts), args.verbose
+    try:
+        max_files = int(args.max_files)
+    except TypeError:
+        max_files = args.max_files
+
+    try:
+        max_attempts = int(args.max_attempts)
+    except TypeError:
+        max_attempts = default_max_attempts
+
+    return args.localdir, args.remotedir, max_files, max_attempts, args.verbose
 
 def main():
     localdir, remotedir, max_files, max_attempts, verbosity = get_args()
