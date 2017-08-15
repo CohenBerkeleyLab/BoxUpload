@@ -128,12 +128,15 @@ def _is_remote_file_different(local_file, remote_file, fatal_if_nonexistant=Fals
             raise
 
     local_size, local_mtime = _local_file_size_modtime(local_file)
-
-    # Otherwise, compare the size (in blocks - hopefully that is consistent) and the modification time.
+    # We need to remove the sub-minute components of the local mtime, because if the remote file has the same
+    # mtime as the local, but only to the minute resolution, the the local mtime will always appear to be
+    # newer than the remote.
+    local_mtime = local_mtime.replace(second=0, microsecond=0)
+    
     if local_must_be_newer:
-        return local_mtime > remote_mtime and local_size != remote_size
+        return local_mtime > remote_mtime or local_size != remote_size
     else:
-        return local_mtime != remote_mtime and local_size != remote_size
+        return local_mtime != remote_mtime or local_size != remote_size
 
 def _remote_file_size_modtime(remote_file):
     """
@@ -164,7 +167,7 @@ def _remote_file_size_modtime(remote_file):
         modification_time = dt.datetime.strptime(date_string, '%b %d %Y')
     except ValueError:
         modification_time = dt.datetime.strptime(date_string, '%b %d %H:%M')
-        modification_time.year = dt.date.today().year
+        modification_time = modification_time.replace(year=dt.date.today().year)
 
     return size_in_bytes, modification_time
 
@@ -207,7 +210,7 @@ def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*", inclu
         if flocal not in lsremote:
             missing_files.append(flocal)
             foundstr = "MISSING"
-        elif include_different and _is_remote_file_different(flocal, os.path.join(remotedir, flocal), local_must_be_newer=True):
+        elif include_different and _is_remote_file_different(os.path.join(localdir, flocal), os.path.join(remotedir, flocal), local_must_be_newer=True):
             missing_files.append(flocal)
             foundstr = "DIFFERENT"
 
