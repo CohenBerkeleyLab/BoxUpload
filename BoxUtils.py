@@ -1,10 +1,13 @@
 from __future__ import print_function
 import copy
+import datetime as dt
 import os
 import sys
 import subprocess
 import warnings
 import re
+
+#TODO: figure out a way to check if a file exists on the remote, but the local file is newer/different
 
 box_url = "ftp.box.com"
 DEBUG_LEVEL = 0
@@ -105,8 +108,80 @@ def _make_remote_dir_if_needed(remotedir, verbosity=0):
     elif verbosity > 2:
         shell_msg('Created remote directory {0}'.format(remotedir))
 
+def _is_remote_file_different(local_file, remote_file, fatal_if_nonexistant=False, local_must_be_newer=False):
+    """
+    Checks the modification time and size of the local file against the remote file.
+    :param local_file: The path to the local file
+    :param remote_file: The path to the remote file
+    :param fatal_if_nonexistant: boolean (default False) that controls if an error should be thrown if the remote file
+    does not exist.
+    :return: a boolean, True if the remote file is younger or a different size than the local file, False otherwise
+    """
+    # Check for an error, if the error is that the file does not exist. By default, if the remote file does not exist,
+    # assume that means that it needs to be uploaded. However, if fatal_if_nonexistant is True, then raise an exception.
+    try:
+        remote_size, remote_mtime = _remote_file_size_modtime(remote_file)
+    except IOError:
+        if not fatal_if_nonexistant:
+            return False
+        else:
+            raise
 
-def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*"):
+    local_size, local_mtime = _local_file_size_modtime(local_file)
+    # We need to remove the sub-minute components of the local mtime, because if the remote file has the same
+    # mtime as the local, but only to the minute resolution, the the local mtime will always appear to be
+    # newer than the remote.
+    local_mtime = local_mtime.replace(second=0, microsecond=0)
+    
+    if local_must_be_newer:
+        return local_mtime > remote_mtime or local_size != remote_size
+    else:
+        return local_mtime != remote_mtime or local_size != remote_size
+
+def _remote_file_size_modtime(remote_file):
+    """
+    Gets the file size in bytes and the modification time of the given remote file. If the modification time was in a
+    previous year, it can only be retrieved with time resolution of a day. Otherwise, it has a time resolution of
+    minutes.
+    :param remote_file: the path to the remote file, as a string
+    :return: size in bytes as an int, modification time as a datetime object.
+    """
+    child = subprocess.Popen(["lftp", "-e", "cd {0}; cls -l {1}; bye".format(os.path.dirname(remote_file), os.path.basename(remote_file)),
+                              box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result = child.wait()
+    msg = child.communicate()
+    if result != 0:
+        if 'No such directory' in msg[1]:
+            raise IOError('remote_file {0} does not exist'.format(remote_file))
+        else:
+            raise RuntimeError('lftp command failed')
+
+    # This should have [permissions, ?, owner, group, size in blocks, month, day, time or year, filename]
+    ls_data = msg[0].split()
+    date_string = ' '.join(ls_data[5:8])
+
+    size_in_bytes = int(ls_data[4])
+    # Try month-day-year format first. If that does work, it must be month-day-hour:minute. In the latter case, we must
+    # add the current year to the date.
+    try:
+        modification_time = dt.datetime.strptime(date_string, '%b %d %Y')
+    except ValueError:
+        modification_time = dt.datetime.strptime(date_string, '%b %d %H:%M')
+        modification_time = modification_time.replace(year=dt.date.today().year)
+
+    return size_in_bytes, modification_time
+
+def _local_file_size_modtime(local_file):
+    """
+    Gets the file size in bytes and the modification time of the given local file.
+    :param remote_file: the path to the remote file, as a string
+    :return: size in bytes as an int, modification time as a datetime object.
+    """
+    size_in_bytes = os.path.getsize(local_file)
+    modification_time = dt.datetime.fromtimestamp(os.path.getmtime(local_file))
+    return size_in_bytes, modification_time
+
+def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*", include_different=False):
     # Get the listing of all files in the remote directory
     lftp_cmd = "find {0}; bye".format(remotedir)
     if modern_subproc:
@@ -135,13 +210,16 @@ def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*"):
         if flocal not in lsremote:
             missing_files.append(flocal)
             foundstr = "MISSING"
+        elif include_different and _is_remote_file_different(os.path.join(localdir, flocal), os.path.join(remotedir, flocal), local_must_be_newer=True):
+            missing_files.append(flocal)
+            foundstr = "DIFFERENT"
 
         if DEBUG_LEVEL > 1:
             print("Checking for {0} on remote... {1}".format(flocal, foundstr))
 
     return missing_files
 
-def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attempts=10, verbosity=0):
+def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attempts=10, include_different=False, verbosity=0):
     # Input checking
     if not os.path.isdir(localdir):
         raise ValueError('localdir must be a directory (not a file)')
@@ -153,7 +231,7 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
 
     # Are we actually missing any files? We need to make the root remote directory before doing this operation
     _make_remote_dir_if_needed(remotedir)
-    missing_files = sorted(find_missing_remote_files_recursive(localdir, remotedir))
+    missing_files = sorted(find_missing_remote_files_recursive(localdir, remotedir, include_different=include_different))
     # Limit the number of files we'll try to mirror at once, if requested
     if max_num_files is not None:
         missing_files = missing_files[:max_num_files]
@@ -180,7 +258,7 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
                 if verbosity > 2:
                     shell_msg("    From lftp: {0}".format(child.communicate()[1]))
 
-        tmp_missing_files = find_missing_remote_files_recursive(localdir, remotedir)
+        tmp_missing_files = find_missing_remote_files_recursive(localdir, remotedir, include_different=include_different)
         missing_files = [f for f in files_to_transfer if f in tmp_missing_files]
 
         number_attempts -= 1
