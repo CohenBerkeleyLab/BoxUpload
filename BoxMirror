@@ -19,15 +19,17 @@ def get_args():
     parser.add_argument('remotedir', help='The remote directory to mirror to; it will take on the EXACT structure of the local directory')
     parser.add_argument('--max-files', '-n', help='The maximum number of files to try to copy (default unlimited)')
     parser.add_argument('--max-attempts', '-m', help='The maximum number of times to attempt to copy the files (default 10)')
+    parser.add_argument('--only-missing', '-o', action='store_true', help='Flag that means this will only copy files that do not exist on the remote, rather than copying if the local file is newer')
     parser.add_argument('--verbose', '-v', action='count', help='Increase verbosity; will print more real time information about the behavior of LFTP')
 
     args = parser.parse_args()
-    return args.localdir, args.remotedir, int(args.max_files), int(args.max_attempts), args.verbose
+    return args.localdir, args.remotedir, int(args.max_files), int(args.max_attempts), args.only_missing, args.verbose
 
 def main():
-    localdir, remotedir, max_files, max_attempts, verbosity = get_args()
+    localdir, remotedir, max_files, max_attempts, only_missing, verbosity = get_args()
 
-    result = BoxUtils.mirror_local_to_remote(localdir, remotedir, max_num_files=max_files, number_attempts=max_attempts, verbosity=verbosity)
+    result = BoxUtils.mirror_local_to_remote(localdir, remotedir, max_num_files=max_files, number_attempts=max_attempts,
+                                             include_different=not only_missing, verbosity=verbosity)
     if result:
         exit(0)
     else:
