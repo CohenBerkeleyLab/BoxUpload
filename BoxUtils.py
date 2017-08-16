@@ -1,11 +1,14 @@
 from __future__ import print_function
 import copy
 import datetime as dt
+from ftplib import FTP_TLS, error_perm
+from netrc import netrc
 import os
 import sys
 import subprocess
 import warnings
 import re
+import time
 
 #TODO: figure out a way to check if a file exists on the remote, but the local file is newer/different
 
@@ -33,6 +36,40 @@ def shell_error(msg, exitcode=1):
     """
     print(msg, file=sys.stderr)
     exit(exitcode)
+
+class FTPrc(FTP_TLS):
+    def __init__(self, host, netrc_file=os.path.join(os.path.expanduser('~'), '.netrc')):
+        try:
+            net_id = netrc(netrc_file).hosts[host]
+        except KeyError:
+            raise RuntimeError('The host "{0}" is not defined in the netrc file {1}'.format(host, netrc_file))
+
+        FTP_TLS.__init__(self, host, net_id[0], net_id[2])
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.quit()
+
+    def get_file_mtime(self, remote_file):
+        mdtm_response = self.sendcmd('MDTM {}'.format(remote_file))
+
+        # The MDTM command can provide fractions of a second, but is not required to by RPC 3659 (sect. 2.3,
+        # https://tools.ietf.org/html/rfc3659#section-2.3). Therefore, we will truncate to seconds in both the remote
+        # and local times.
+        #
+        # Testing with both, the response seems to be a response code (i.e. 213) followed by a string in yyyymmddHHMMSS
+        # in UTC time
+        _, mtime = mdtm_response.split()
+        mtime = mtime.split('.')[0]
+        mtime = dt.datetime.strptime(mtime, '%Y%m%d%H%M%S')
+
+        # Will be used to convert to local time
+        utc_offset = time.localtime().tm_hour - time.gmtime().tm_hour
+
+        return mtime.replace(hour=mtime.hour + utc_offset)
+
 
 def remove_hidden_files(files):
     """
@@ -121,17 +158,16 @@ def _is_remote_file_different(local_file, remote_file, fatal_if_nonexistant=Fals
     # assume that means that it needs to be uploaded. However, if fatal_if_nonexistant is True, then raise an exception.
     try:
         remote_size, remote_mtime = _remote_file_size_modtime(remote_file)
-    except IOError:
+    except error_perm: # I'm assuming that error_perm is only raised if the file doesn't exist, which is probably incorrect, but I have no way to test if you don't have permission to access the file
         if not fatal_if_nonexistant:
             return False
         else:
             raise
 
     local_size, local_mtime = _local_file_size_modtime(local_file)
-    # We need to remove the sub-minute components of the local mtime, because if the remote file has the same
-    # mtime as the local, but only to the minute resolution, the the local mtime will always appear to be
-    # newer than the remote.
-    local_mtime = local_mtime.replace(second=0, microsecond=0)
+    # We need to remove the sub-second components of the local mtime, because it is not required of the FTP MDTM command
+    # that we use to get the remote time that it include smaller time resolution than seconds.
+    local_mtime = local_mtime.replace(microsecond=0)
     
     if local_must_be_newer:
         return local_mtime > remote_mtime or local_size != remote_size
@@ -146,28 +182,9 @@ def _remote_file_size_modtime(remote_file):
     :param remote_file: the path to the remote file, as a string
     :return: size in bytes as an int, modification time as a datetime object.
     """
-    child = subprocess.Popen(["lftp", "-e", "cd {0}; cls -l {1}; bye".format(os.path.dirname(remote_file), os.path.basename(remote_file)),
-                              box_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    result = child.wait()
-    msg = child.communicate()
-    if result != 0:
-        if 'No such directory' in msg[1]:
-            raise IOError('remote_file {0} does not exist'.format(remote_file))
-        else:
-            raise RuntimeError('lftp command failed')
-
-    # This should have [permissions, ?, owner, group, size in blocks, month, day, time or year, filename]
-    ls_data = msg[0].split()
-    date_string = ' '.join(ls_data[5:8])
-
-    size_in_bytes = int(ls_data[4])
-    # Try month-day-year format first. If that does work, it must be month-day-hour:minute. In the latter case, we must
-    # add the current year to the date.
-    try:
-        modification_time = dt.datetime.strptime(date_string, '%b %d %Y')
-    except ValueError:
-        modification_time = dt.datetime.strptime(date_string, '%b %d %H:%M')
-        modification_time = modification_time.replace(year=dt.date.today().year)
+    with FTPrc(box_url) as ftpobj:
+        size_in_bytes = ftpobj.size(remote_file)
+        modification_time = ftpobj.get_file_mtime(remote_file)
 
     return size_in_bytes, modification_time
 
