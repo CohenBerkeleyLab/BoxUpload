@@ -145,7 +145,7 @@ def _make_remote_dir_if_needed(remotedir, verbosity=0):
     elif verbosity > 2:
         shell_msg('Created remote directory {0}'.format(remotedir))
 
-def _is_remote_file_different(local_file, remote_file, fatal_if_nonexistant=False, local_must_be_newer=False):
+def _is_remote_file_different(local_file, remote_file, ftp_connection, fatal_if_nonexistant=False, local_must_be_newer=False):
     """
     Checks the modification time and size of the local file against the remote file.
     :param local_file: The path to the local file
@@ -157,7 +157,7 @@ def _is_remote_file_different(local_file, remote_file, fatal_if_nonexistant=Fals
     # Check for an error, if the error is that the file does not exist. By default, if the remote file does not exist,
     # assume that means that it needs to be uploaded. However, if fatal_if_nonexistant is True, then raise an exception.
     try:
-        remote_size, remote_mtime = _remote_file_size_modtime(remote_file)
+        remote_size, remote_mtime = _remote_file_size_modtime(ftp_connection, remote_file)
     except error_perm: # I'm assuming that error_perm is only raised if the file doesn't exist, which is probably incorrect, but I have no way to test if you don't have permission to access the file
         if not fatal_if_nonexistant:
             return False
@@ -174,7 +174,7 @@ def _is_remote_file_different(local_file, remote_file, fatal_if_nonexistant=Fals
     else:
         return local_mtime != remote_mtime or local_size != remote_size
 
-def _remote_file_size_modtime(remote_file):
+def _remote_file_size_modtime(ftpobj, remote_file):
     """
     Gets the file size in bytes and the modification time of the given remote file. If the modification time was in a
     previous year, it can only be retrieved with time resolution of a day. Otherwise, it has a time resolution of
@@ -182,9 +182,8 @@ def _remote_file_size_modtime(remote_file):
     :param remote_file: the path to the remote file, as a string
     :return: size in bytes as an int, modification time as a datetime object.
     """
-    with FTPrc(box_url) as ftpobj:
-        size_in_bytes = ftpobj.size(remote_file)
-        modification_time = ftpobj.get_file_mtime(remote_file)
+    size_in_bytes = ftpobj.size(remote_file)
+    modification_time = ftpobj.get_file_mtime(remote_file)
 
     return size_in_bytes, modification_time
 
@@ -221,18 +220,21 @@ def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*", inclu
         lsremote.remove('')
 
     missing_files = []
-    for flocal in iter_dir_tree(localdir, pattern=filepat):
-        flocal = _remove_path_head(flocal, localdir)
-        foundstr = "Found"
-        if flocal not in lsremote:
-            missing_files.append(flocal)
-            foundstr = "MISSING"
-        elif include_different and _is_remote_file_different(os.path.join(localdir, flocal), os.path.join(remotedir, flocal), local_must_be_newer=True):
-            missing_files.append(flocal)
-            foundstr = "DIFFERENT"
+    # Hopefully, by opening a single FTP connection per check for missing files, we can significantly speed up this step
+    # over opening a new FTP connection each time _remote_file_size_modtime() is called in _is_remote_file_different().
+    with FTPrc(box_url) as ftpobj:
+        for flocal in iter_dir_tree(localdir, pattern=filepat):
+            flocal = _remove_path_head(flocal, localdir)
+            foundstr = "Found"
+            if flocal not in lsremote:
+                missing_files.append(flocal)
+                foundstr = "MISSING"
+            elif include_different and _is_remote_file_different(os.path.join(localdir, flocal), os.path.join(remotedir, flocal), ftp_connection=ftpobj, local_must_be_newer=True):
+                missing_files.append(flocal)
+                foundstr = "DIFFERENT"
 
-        if DEBUG_LEVEL > 1:
-            print("Checking for {0} on remote... {1}".format(flocal, foundstr))
+            if DEBUG_LEVEL > 1:
+                print("Checking for {0} on remote... {1}".format(flocal, foundstr))
 
     return missing_files
 
