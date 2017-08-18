@@ -68,7 +68,7 @@ class FTPrc(FTP_TLS):
         # Will be used to convert to local time
         utc_offset = time.localtime().tm_hour - time.gmtime().tm_hour
 
-        return mtime.replace(hour=mtime.hour + utc_offset)
+        return mtime.replace(hour=(mtime.hour + utc_offset)%24)
 
 
 def remove_hidden_files(files):
