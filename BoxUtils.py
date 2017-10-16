@@ -10,6 +10,8 @@ import warnings
 import re
 import time
 
+import pdb
+
 #TODO: figure out a way to check if a file exists on the remote, but the local file is newer/different
 
 box_url = "ftp.box.com"
@@ -126,10 +128,16 @@ def _remove_path_head(path, head):
     :param head: the head to remove, may or may not include trailing "/"
     :return: path with head removed
     """
-    if path.startswith(head):
-        path = path.replace(head, '')
-        if path.startswith('/'):
-            path = path[1:]
+    # Bugfix 13 Oct 2017: path.replace(head,'') will remove head from everywhere in the path. This
+    # is especially problematic if the user gives the local dir as "." (i.e. the current directory)
+    # because it will remove periods from filenames
+
+    # Find the head at the beginning of the path only. Escape any characters in head that have special
+    # meaning in a regular expression (e.g. "." means "any character")
+    head_regex = '^{}'.format(re.escape(head))
+    path = re.sub(head_regex, '', path)
+    if path.startswith('/'):
+        path = path[1:]
 
     return path
 
@@ -141,7 +149,7 @@ def _make_remote_dir_if_needed(remotedir, verbosity=0):
             if verbosity > 2:
                 shell_msg('Remote directory {0} already exists, no need to create it'.format(remotedir))
         else:
-            raise RuntimeError("mkdir -p failed on remote: {0}".format(child.communicate()[1]))
+            raise RuntimeError("mkdir -p failed on remote: {0}".format(err_msg))
     elif verbosity > 2:
         shell_msg('Created remote directory {0}'.format(remotedir))
 
@@ -238,7 +246,7 @@ def find_missing_remote_files_recursive(localdir, remotedir, filepat=".*", inclu
 
     return missing_files
 
-def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attempts=10, include_different=False, verbosity=0):
+def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attempts=10, include_different=False, retry_mkdir=False, verbosity=0):
     # Input checking
     if not os.path.isdir(localdir):
         raise ValueError('localdir must be a directory (not a file)')
@@ -265,7 +273,14 @@ def mirror_local_to_remote(localdir, remotedir, max_num_files=None, number_attem
         for f in missing_files:
             file_subdir = os.path.dirname(f)
             file_remote_path = remotedir + "/" + file_subdir
-            _make_remote_dir_if_needed(file_remote_path, verbosity=verbosity)
+            try:
+                _make_remote_dir_if_needed(file_remote_path, verbosity=verbosity)
+            except RuntimeError:
+                if retry_mkdir:
+                    if verbosity > 1:
+                        shell_msg("  mkdir command failed; will try again after trying all other files")
+                else:
+                    raise
             file_local_path = os.path.join(localdir, f)
             if verbosity > 1:
                 shell_msg("Transferring file {0} of {1}: {2}".format(missing_files.index(f)+1, len(missing_files), file_local_path))
